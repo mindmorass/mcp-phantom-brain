@@ -20,7 +20,7 @@ export const CONFIG = {
   INPUT_FOLDER: 'Input',
   INPUT_SUBFOLDERS: ['articles', 'docs', 'transcripts', 'notes'] as const,
   WIKI_FOLDER: 'Wiki',
-  WIKI_SUBFOLDERS: ['HowTos', 'Runbooks', 'References', 'Scratch'] as const,
+  WIKI_SUBFOLDERS: [] as const,
   OUTPUT_FOLDER: 'Output',
   OUTPUT_SUBFOLDERS: ['articles', 'reports', 'decks'] as const,
   // System folders
