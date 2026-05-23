@@ -1,57 +1,38 @@
 import { z } from 'zod';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { handleCleanup } from './cleanup.js';
 import { logger } from '../shared/logger.js';
 import { formatError } from '../shared/errors.js';
 
 export const BrainReflectSchema = z.object({
-  scope: z.enum(['full', 'cleanup_only', 'conflicts_only']).optional().default('full'),
+  scope: z.enum(['full', 'light']).optional().default('full'),
 });
 
 export const brainReflectToolDefinition = {
   name: 'brain_reflect',
   description:
-    'Periodic brain maintenance: prune stale atoms, surface conflicts, synthesize concepts. ' +
-    'Currently implements stale-atom cleanup; conflict resolution and concept synthesis are ' +
-    'planned for future phases.',
+    'Periodic brain maintenance: contradiction scan, staleness check, orphan/gap detection, ' +
+    'cross-reference audit, reliability upgrades, _index.md graduation review, ' +
+    'Wiki/CLAUDE.md learned-behavior updates. Phase 4 implementation — currently a stub.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       scope: {
         type: 'string',
-        enum: ['full', 'cleanup_only', 'conflicts_only'],
-        description: 'Which reflection passes to run (default: full)',
+        enum: ['full', 'light'],
+        description: 'full = nightly pass; light = newly-updated pages only (default: full)',
       },
     },
   },
 };
 
-function extractText(result: CallToolResult): string {
-  const first = result.content[0];
-  if (!first || first.type !== 'text') return '';
-  return first.text;
-}
-
 export async function runBrainReflect(input: z.infer<typeof BrainReflectSchema>) {
-  const results: Record<string, unknown> = {};
-
-  if (input.scope === 'full' || input.scope === 'cleanup_only') {
-    const cleanup = await handleCleanup({
-      target: 'stale',
-      action: 'delete',
-      dry_run: false,
-      limit: 50,
-      confirm: true,
-    });
-    results['cleanup'] = {
-      isError: cleanup.isError ?? false,
-      output: extractText(cleanup),
-    };
-  }
-
-  results['note'] = 'Conflict resolution and concept synthesis are planned for a future phase.';
-
-  return results;
+  logger.info('brain_reflect called', { scope: input.scope });
+  return {
+    status: 'stub',
+    scope: input.scope,
+    message: 'brain_reflect is a Phase 4 feature. Wiki lint, contradiction resolution, and ' +
+      'reliability upgrades will be implemented once Phase 1 (entity layer) is in place.',
+  };
 }
 
 export async function handleBrainReflect(args: unknown): Promise<CallToolResult> {

@@ -28,6 +28,17 @@ export const CONFIG = {
   INDEX_FOLDER: '_index',
   TEMPLATE_FOLDER: '_templates',
   LOG_FOLDER: '_log',
+  // Brain model Phase 0 — Raw / queue / wiki extensions
+  RAW_FOLDER: 'Raw',
+  RAW_GATHERED: 'Raw/gathered',
+  RAW_CURATED: 'Raw/curated',
+  QUEUE_FOLDER: '_queue',
+  QUEUE_PENDING: '_queue/pending',
+  QUEUE_DONE: '_queue/done',
+  WIKI_SUMMARIES: 'summaries',   // subfolder under Wiki/
+  WIKI_ENTITIES: 'entities',     // subfolder under Wiki/
+  WIKI_LOG_FILE: '_log.md',      // under Wiki/
+  PROVENANCE_FILE: 'provenance.json',  // under _index/
   // Index file name used at each layer root and subfolder
   INDEX_FILE: '_index.md',
   // Limits
