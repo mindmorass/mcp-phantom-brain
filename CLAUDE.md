@@ -25,7 +25,7 @@ There are no tests. `npm run typecheck` is the primary verification step.
 
 ## Architecture
 
-mcp-brain is a **Model Context Protocol server** that implements a two-layer memory system backed by an Obsidian vault on disk. It communicates over stdio using the `@modelcontextprotocol/sdk`.
+mcp-phantom-brain is a **Model Context Protocol server** implementing a Raw → Gate → Wiki synthesis pipeline backed by an Obsidian vault on disk. It communicates over stdio using the `@modelcontextprotocol/sdk`.
 
 ### Entry points
 
@@ -33,64 +33,82 @@ mcp-brain is a **Model Context Protocol server** that implements a two-layer mem
 - `src/server.ts` — registers MCP tools and connects the stdio transport
 - `src/core/index.ts` — `initialize()` / `shutdown()` lifecycle; called once at startup
 
-### The five MCP tools
+### MCP tools
 
 | Tool | File | Purpose |
 |---|---|---|
-| `brain_recall` | `tools/brain-recall.ts` | FTS5 + vector hybrid search over Memory + Wiki |
-| `brain_remember` | `tools/brain-remember.ts` | Layer 1 validation (coherence, domain tier, near-duplicate); returns an evaluation package for the host LLM |
-| `brain_commit` | `tools/brain-commit.ts` | Commits the host LLM's verdict: `store` writes an atom, `reject` logs to rejection log, `ask` returns a clarification request |
-| `brain_reflect` | `tools/brain-reflect.ts` | Maintenance pass: prunes stale atoms |
-| `brain_why_rejected` | `tools/brain-why-rejected.ts` | Retrieves rejection reasoning from the rejection log |
+| `brain_learn` | `tools/brain-learn.ts` | Ingest a curated document into `Raw/curated/` and enqueue for synthesis |
+| `brain_perceive` | `tools/brain-perceive.ts` | Ingest a gathered web source into `Raw/gathered/` and enqueue for gate + synthesis |
+| `brain_synthesize` | `tools/brain-synthesize.ts` | Claim next queue item, run the Gate, write summary + entity pages, append to `_log.md` |
+| `brain_recall` | `tools/brain-recall.ts` | FTS5 + vector hybrid search over Wiki summaries and entity pages |
+| `brain_reflect` | `tools/brain-reflect.ts` | Maintenance pass: orphan detection, stale gate re-scoring, broken provenance cleanup, duplicate URL flagging |
+| `brain_trace` | `tools/brain-trace.ts` | Query `Wiki/_log.md` synthesis audit trail; filter by query, reliability, or date |
+| `task_start` | `tools/task.ts` | Create a working memory task, auto-seeded from vault context |
+| `task_update` | `tools/task.ts` | Append findings, steps, artifacts, and open questions to an active task |
+| `task_complete` | `tools/task.ts` | Promote medium/high findings to `Raw/curated/` queue, then clear the task |
+| `task_get` | `tools/task.ts` | Read current task state or list active tasks |
 
-`brain_remember` + `brain_commit` is a two-phase protocol: `brain_remember` returns a structured package that the host LLM reads and then commits via `brain_commit`. Never call `brain_commit` without a prior `brain_remember` evaluation package.
+### Ingest → Synthesis pipeline
+
+1. **`brain_learn`** (curated) or **`brain_perceive`** (gathered) writes raw content to `Raw/` and enqueues a `QueueItem` in `_index/queue/`.
+2. **`brain_synthesize`** claims one queue item, runs the Gate (`src/gate/evaluate.ts`), writes a summary page to `Wiki/summaries/`, fans out into entity pages under `Wiki/entities/`, appends a log line to `Wiki/_log.md`, and records the `Raw → Wiki` mapping in `_index/provenance.json`.
+3. **`brain_recall`** searches the indexed summaries and entity pages via hybrid RRF (FTS5 + vector).
+4. **`brain_trace`** queries the append-only `_log.md` for audit and debugging.
+
+Duplicate detection is by SHA256 at ingest time — re-submitting the same byte-for-byte content is a no-op.
+
+### The Gate (`src/gate/evaluate.ts`)
+
+`runGate()` never throws. It returns a `GateVerdict` with fields `reliability`, `category?`, and `reason`.
+
+- **Curated sources** (`brain_learn`) — skip the LLM. Human curation is the quality signal; verdict is fixed `medium`.
+- **Gathered sources** (`brain_perceive`) — Phase 2 LLM gate: combines domain tier (`src/validation/source-tiers.ts`) with content preview and calls the `claude` CLI for a JSON verdict. Uses the subscription credentials already active in the running Claude Code session — no separate API key required. Falls back to `medium` on any failure (CLI unavailable, timeout, parse error).
+
+Domain tiers: `authoritative | credible | unknown | low_quality`.
 
 ### Vault structure
 
-The vault is a directory of Markdown files with YAML frontmatter. Path is resolved from `BRAIN_VAULT_PATH` env var (falls back to `~/workspaces/profiles/personal/obsidian/vaults/memory`).
+Path is resolved from `BRAIN_VAULT_PATH` env var (falls back to `~/workspaces/profiles/personal/obsidian/vaults/memory`).
 
 ```
 <vault>/
-  Memory/          ← atom files (one fact per file, frontmatter + body)
+  Raw/
+    curated/         ← brain_learn writes here (human-curated docs)
+    gathered/        ← brain_perceive writes here (web content)
   Wiki/
-    HowTos/
-    Runbooks/
-    References/    ← seed pages (logical-fallacies, philosophical-razors, etc.)
-    Scratch/
-  Input/           ← raw source material
-  Output/          ← deliverables
-  _index/          ← SQLite FTS5 + vector index files
-  _log/            ← rejection log (rejections.jsonl — JSONL, one entry per line; includes `content` field for searchability)
+    summaries/       ← one summary page per synthesized source
+    entities/        ← one page per extracted entity, appended across sources
+    _log.md          ← append-only synthesis audit trail (brain_trace reads this)
+    _index.md        ← graduated index by reliability tier (auto-refreshed)
+  _index/
+    fts.db           ← SQLite FTS5 full-text index
+    vectors.db       ← sqlite-vec cosine similarity index
+    provenance.json  ← Raw path → Wiki pages + reliability mapping
+    queue/           ← pending/ and done/ QueueItem JSON files
+  _working.db        ← SQLite working memory (tasks, findings, artifacts)
 ```
 
 ### Indexing pipeline (`src/vault/search.ts`)
 
-On startup, `buildIndex()` reads every Memory and Wiki file and populates:
+On startup, `buildIndex()` reads every Wiki file and populates:
 
-1. **In-memory maps** — `memoryIndex` (id → entry), `slugIndex`, `titleIndex`, `wikiIndex`
+1. **In-memory maps** — `wikiIndex` (slug → entry), `titleIndex`
 2. **SQLite FTS5** — BM25 full-text search (`src/vault/fts-index.ts`)
 3. **sqlite-vec vector index** — cosine similarity via Ollama embeddings (`src/vault/vector-index.ts`, `src/vault/embeddings.ts`)
 
 `searchMemories()` uses **hybrid RRF** (Reciprocal Rank Fusion) combining FTS5 and vector ranks when Ollama is available; falls back to FTS5-only or in-memory keyword scan otherwise.
 
-### Validation pipeline (`src/validation/`)
-
-`brain_remember` runs three Layer 1 checks before any LLM evaluation:
-- **Coherence** (`coherence.ts`) — structural/length checks
-- **Source domain tier** (`source-tiers.ts`) — classifies URLs as `authoritative | credible | unknown | low_quality`
-- **Near-duplicate** (`duplicate.ts`) — hash + semantic proximity check
-
-Low-quality sources and incoherent content are rejected at Layer 1 without LLM involvement.
+New summary and entity pages are indexed incrementally via `indexWikiEntry()` after each `brain_synthesize` call — no full rebuild needed.
 
 ### Working memory (`src/working/`)
 
-SQLite DB (`_working.db` in the vault) tracks in-progress tasks with findings, steps, and artifacts. `promotion.ts` handles promoting findings to long-term Memory atoms on task completion. The DB is per-process and cleaned up on `SIGINT`/`SIGTERM`.
+SQLite DB (`_working.db` in the vault root) tracks in-progress tasks with findings, steps, and artifacts.
 
-### Frontmatter schema (`src/schemas/frontmatter.ts`)
+- `db.ts` — schema, CRUD operations
+- `retrieval.ts` — seeds new tasks with relevant vault context via `brain_recall`
+- `promotion.ts` — on `task_complete`, promotes medium/high findings to `Raw/curated/` queue for synthesis
 
-Memory atoms use a YAML frontmatter schema with fields: `id`, `title`, `lifecycle_status` (`active | reference | archive`), `tags`, `confidence` (`low | medium | high`), `ttl_days`, `source_urls`, `wiki_refs`, etc.
-
-**Migration note**: the old `para` field (PARA method: `projects | areas | resources | archives`) is in Phase 1 migration — `normalizeFrontmatter()` maps it to `lifecycle_status`. Remove `para` support in Phase 2.
+The DB is per-process and cleaned up on `SIGINT`/`SIGTERM`.
 
 ### Configuration (`src/config.ts`)
 
@@ -99,6 +117,8 @@ All tunables are in `CONFIG`. Key env vars:
 | Var | Default | Purpose |
 |---|---|---|
 | `BRAIN_VAULT_PATH` | `~/workspaces/.../memory` | Vault root |
+| `GATE_ENABLED` | `true` | Set to `false` to disable Phase 2 gate; all gathered sources default to medium |
+| `GATE_MODEL` | `claude-haiku-4-5-20251001` | Model passed to the `claude` CLI for gate evaluation |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Embeddings endpoint |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model |
 | `EMBEDDING_DIMS` | `768` | Vector dimensions |
