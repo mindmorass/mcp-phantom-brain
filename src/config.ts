@@ -6,10 +6,11 @@ function resolveVaultPath(): string {
   const fromObsidian = process.env['OBSIDIAN_VAULT_PATH'];
   const raw = fromBrain || fromObsidian || path.join(home, 'workspaces/profiles/personal/obsidian/vaults/memory');
   // Expand a leading ~ to $HOME so users can write ~/foo in env files
-  if (raw.startsWith('~')) {
-    return path.join(home, raw.slice(1));
-  }
-  return raw;
+  let resolved = raw.startsWith('~') ? path.join(home, raw.slice(1)) : raw;
+  // Claude Code's MCP env expansion partially evaluates shell fallback syntax
+  // (e.g. ${VAR:-${OTHER}}) leaving a trailing '}'. Strip it.
+  resolved = resolved.replace(/}+$/, '');
+  return resolved;
 }
 
 export const CONFIG = {

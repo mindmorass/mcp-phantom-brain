@@ -90,6 +90,7 @@ export async function runBrainCommit(input: z.infer<typeof BrainCommitSchema>) {
   if (decision === 'reject' || isDisputedStore) {
     await appendRejection({
       timestamp: new Date().toISOString(),
+      content,
       content_hash: content_hash ?? '',
       ...(source_url !== undefined && { source_url }),
       domain: domainFromUrl(source_url),

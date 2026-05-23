@@ -6,6 +6,7 @@ import { logger } from '../shared/logger.js';
 
 export interface RejectionEntry {
   timestamp: string;
+  content: string;
   content_hash: string;
   source_url?: string;
   domain: string;
@@ -45,6 +46,7 @@ export async function queryRejections(query: string, limit = 10): Promise<Reject
     }
     const q = query.toLowerCase();
     const matched = entries.filter(e =>
+      e.content?.toLowerCase().includes(q) ||
       e.reasoning.toLowerCase().includes(q) ||
       e.domain.toLowerCase().includes(q) ||
       e.fallacies_detected.some(f => f.toLowerCase().includes(q)) ||
