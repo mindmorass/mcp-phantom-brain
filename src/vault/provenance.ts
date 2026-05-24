@@ -58,6 +58,22 @@ export async function writeProvenance(map: ProvenanceMap): Promise<void> {
 }
 
 /**
+ * Atomically add or replace a single entry in provenance.json.
+ * Reads the current file inside the lock so concurrent agents cannot
+ * overwrite each other's entries.
+ */
+export async function upsertProvenanceEntry(rawPath: string, entry: ProvenanceEntry): Promise<ProvenanceMap> {
+  const filePath = provenanceFilePath();
+  let merged: ProvenanceMap = {};
+  await withFileLock(filePath, async () => {
+    merged = await readProvenance();
+    merged[rawPath] = entry;
+    await writeAtomicFile(filePath, JSON.stringify(merged, null, 2) + '\n');
+  });
+  return merged;
+}
+
+/**
  * Check whether a content hash already appears in the provenance map.
  * Async to match the broader provenance API surface (callers will often
  * pair this with reads/writes that are async).

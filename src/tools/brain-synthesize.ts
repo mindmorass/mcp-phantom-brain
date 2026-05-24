@@ -29,7 +29,7 @@ import {
 } from '../vault/queue.js';
 import {
   readProvenance,
-  writeProvenance,
+  upsertProvenanceEntry,
   isHashKnown,
   type ProvenanceEntry,
 } from '../vault/provenance.js';
@@ -301,9 +301,8 @@ export async function runBrainSynthesize(_input: z.infer<typeof BrainSynthesizeS
       await fs.appendFile(logPath, logLine, 'utf-8');
     });
 
-    // Update provenance.json — wiki_pages includes the summary AND all
-    // entity pages this source contributed to.
-    const provenance = await readProvenance();
+    // Update provenance.json atomically — reads the current file inside
+    // the lock so concurrent agents cannot overwrite each other's entries.
     const entry: ProvenanceEntry = {
       wiki_pages: [summaryRel, ...entityPagePaths],
       synthesized_at: synthesizedAt,
@@ -311,8 +310,7 @@ export async function runBrainSynthesize(_input: z.infer<typeof BrainSynthesizeS
       ...(verdict.category !== undefined && { category: verdict.category }),
       content_hash: contentHash ?? '',
     };
-    provenance[rawPath] = entry;
-    await writeProvenance(provenance);
+    await upsertProvenanceEntry(rawPath, entry);
 
     // Refresh Wiki/_index.md graduated tiers from the updated provenance.
     try {
