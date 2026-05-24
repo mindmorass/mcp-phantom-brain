@@ -1,6 +1,6 @@
 {
   "name": "@mindmorass/mcp-phantom-brain",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP phantom brain — unified memory, reasoning, and validation server",
   "type": "module",
   "main": "./dist/index.js",
