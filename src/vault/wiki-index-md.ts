@@ -15,6 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CONFIG } from '../config.js';
 import { writeAtomicFile, withFileLock } from './filesystem.js';
+import { readProvenance } from './provenance.js';
 import type { ProvenanceMap } from './provenance.js';
 
 const PRIMARY_HEADING = '## Primary Topics';
@@ -109,17 +110,23 @@ function renderGraduatedSections(g: EntityGraduation): string {
 /**
  * Rewrite the graduated sections of Wiki/_index.md.
  *
+ * Reads provenance.json inside the file lock so the entire
+ * read-tally-write sequence is atomic. Concurrent callers (e.g. two
+ * MCP instances) serialize here — the second always sees the first's
+ * provenance entry before computing the index.
+ *
  * Preserves any content above the first "## Primary Topics" heading. If the
  * file doesn't exist or has no Primary Topics heading, the graduated sections
  * are appended to whatever is there.
  */
-export async function updateWikiIndex(provenance: ProvenanceMap): Promise<void> {
-  const counts = tallyEntityReferences(provenance);
-  const graduated = graduateEntities(counts);
-  const newSections = renderGraduatedSections(graduated);
-
+export async function updateWikiIndex(): Promise<void> {
   const filePath = wikiIndexPath();
   await withFileLock(filePath, async () => {
+    const provenance = await readProvenance();
+    const counts = tallyEntityReferences(provenance);
+    const graduated = graduateEntities(counts);
+    const newSections = renderGraduatedSections(graduated);
+
     let existing = '';
     try {
       existing = await fs.readFile(filePath, 'utf-8');

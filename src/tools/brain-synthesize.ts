@@ -316,7 +316,7 @@ export async function runBrainSynthesize(_input: z.infer<typeof BrainSynthesizeS
 
     // Refresh Wiki/_index.md graduated tiers from the updated provenance.
     try {
-      await updateWikiIndex(provenance);
+      await updateWikiIndex();
     } catch (idxErr) {
       logger.warn('Failed to update Wiki/_index.md', { error: String(idxErr) });
     }
