@@ -235,7 +235,7 @@ export async function runBrainSynthesize(_input: z.infer<typeof BrainSynthesizeS
     const entityPagePaths: string[] = [];
     const entityNamesProcessed: string[] = [];
 
-    for (const name of entityNames) {
+    await Promise.all(entityNames.map(async (name) => {
       try {
         const { absPath: entAbs, relPath: entRel } = entityPaths(name);
         const snippet = buildContentSnippet(rawContent, name);
@@ -249,26 +249,19 @@ export async function runBrainSynthesize(_input: z.infer<typeof BrainSynthesizeS
           verdict,
         });
 
-        // Index the entity page so brain_recall picks it up without a full rebuild.
-        // Wiki index relPath is relative to Wiki/, not the vault root.
         const wikiRelForIndex = path.posix.join(CONFIG.WIKI_ENTITIES, `${slugFromTitle(name)}.md`);
-        // Use the freshly written content if we have it, otherwise the snippet
-        // is a good-enough body for the index.
-        const indexedBody = snippet;
-        indexWikiEntry(wikiRelForIndex, name, 'entity', [], indexedBody, synthesizedAt, synthesizedAt);
+        indexWikiEntry(wikiRelForIndex, name, 'entity', [], snippet, synthesizedAt, synthesizedAt);
 
         entityPagePaths.push(entRel);
         entityNamesProcessed.push(name);
       } catch (entErr) {
-        // Don't fail the whole synthesis because one entity page broke.
-        // Log it and move on; the queue item is still useful with the summary.
         logger.warn('Failed to process entity page', {
           entity: name,
           raw_path: item.raw_path,
           error: String(entErr),
         });
       }
-    }
+    }));
 
     // Append to Wiki/_log.md (append-only, serialized via lock)
     const logPath = path.join(CONFIG.VAULT_PATH, CONFIG.WIKI_FOLDER, CONFIG.WIKI_LOG_FILE);

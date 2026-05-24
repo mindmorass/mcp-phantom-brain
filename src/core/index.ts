@@ -15,8 +15,7 @@ export { logger } from '../shared/logger.js';
  * built, working memory DB ready. Idempotent at the module level.
  */
 export async function initialize(): Promise<void> {
-  await ensureVaultStructure();
-  await initVectorIndex();
+  await Promise.all([ensureVaultStructure(), initVectorIndex()]);
   await buildIndex();
   ensureWorkingDb();
   syncVectorIndex();

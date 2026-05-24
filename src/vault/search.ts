@@ -220,9 +220,14 @@ async function hybridSearch(options: SearchOptions, query: string): Promise<Sear
     ...ftsHits.map((r) => r.id),
   ]);
 
-  const candidates: SearchResult[] = [];
+  const idList = [...candidateIds];
+  const wEntries = await Promise.all(idList.map((id) => resolveWikiEntry(id)));
 
-  for (const id of candidateIds) {
+  const candidates: SearchResult[] = [];
+  for (let i = 0; i < idList.length; i++) {
+    const id = idList[i]!;
+    const wEntry = wEntries[i];
+    if (!wEntry) continue;
     const vr = vectorRank.get(id);
     const fr = ftsRank.get(id);
     let rrf = 0;
@@ -230,12 +235,8 @@ async function hybridSearch(options: SearchOptions, query: string): Promise<Sear
     if (fr) rrf += 1 / (RRF_K + fr);
     const score = Math.round(rrf * 10000) / 10000;
     const snippet = ftsSnippet.get(id) || undefined;
-
-    const wEntry = await resolveWikiEntry(id);
-    if (wEntry) {
-      if (!passesWikiFilters(wEntry, options)) continue;
-      candidates.push({ resultKind: 'wiki', wikiEntry: wEntry, score, snippet, stale: false });
-    }
+    if (!passesWikiFilters(wEntry, options)) continue;
+    candidates.push({ resultKind: 'wiki', wikiEntry: wEntry, score, snippet, stale: false });
   }
 
   candidates.sort((a, b) => {
@@ -289,15 +290,16 @@ async function keywordSearch(options: SearchOptions): Promise<SearchResult[]> {
 
 async function ftsKeywordSearch(options: SearchOptions, query: string): Promise<SearchResult[]> {
   const ftsHits = searchFts(query, options.limit * 5);
-  const results: SearchResult[] = [];
+  const wEntries = await Promise.all(ftsHits.map((hit) => resolveWikiEntry(hit.id)));
 
-  for (const hit of ftsHits) {
-    const wEntry = await resolveWikiEntry(hit.id);
-    if (wEntry) {
-      if (!passesWikiFilters(wEntry, options)) continue;
-      results.push({ resultKind: 'wiki', wikiEntry: wEntry, score: hit.rank, snippet: hit.snippet || undefined, stale: false });
-      if (results.length >= options.limit) break;
-    }
+  const results: SearchResult[] = [];
+  for (let i = 0; i < ftsHits.length; i++) {
+    const hit = ftsHits[i]!;
+    const wEntry = wEntries[i];
+    if (!wEntry) continue;
+    if (!passesWikiFilters(wEntry, options)) continue;
+    results.push({ resultKind: 'wiki', wikiEntry: wEntry, score: hit.rank, snippet: hit.snippet || undefined, stale: false });
+    if (results.length >= options.limit) break;
   }
 
   return results;

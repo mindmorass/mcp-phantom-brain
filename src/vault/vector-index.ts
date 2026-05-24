@@ -374,7 +374,7 @@ export function syncVectorIndex(): void {
           logger.info('Vector index orphans deleted', { count: orphans.length });
         }
 
-        const embeddedIds = getEmbeddedIds();
+        const embeddedIds = new Set(vecRows.map((r) => r.id));
         const missingWiki = [...wIndex.entries()].filter(([id]) => !embeddedIds.has(id));
 
         if (missingWiki.length === 0 && stale.length === 0) {
