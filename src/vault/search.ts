@@ -4,6 +4,7 @@ import matter from 'gray-matter';
 import type { LifecycleStatus, Status } from '../schemas/frontmatter.js';
 import { listAllWikiFiles } from './filesystem.js';
 import { logger } from '../shared/logger.js';
+import { CONFIG } from '../config.js';
 import { embedText, buildEmbedText } from './embeddings.js';
 import { isVectorIndexReady, searchVectors, upsertVector, deleteVector } from './vector-index.js';
 import { isFtsReady, rebuildFts, searchFts, upsertFts, deleteFts } from './fts-index.js';
@@ -73,6 +74,37 @@ export function removeWikiFromIndex(relPath: string): void {
   wikiIndex.delete(id);
   deleteFts(id);
   deleteVector(id);
+}
+
+/**
+ * Resolve a wiki entry by ID, falling back to a disk read when the
+ * in-memory map doesn't have it (e.g. written by another MCP instance).
+ * Populates the map on a cache miss so subsequent hits are free.
+ */
+async function resolveWikiEntry(id: string): Promise<WikiIndexEntry | null> {
+  const cached = wikiIndex.get(id);
+  if (cached) return cached;
+  if (!id.startsWith('wiki:')) return null;
+  const relPath = id.slice(5);
+  const absPath = path.join(CONFIG.VAULT_PATH, relPath);
+  try {
+    const raw = await fs.readFile(absPath, 'utf-8');
+    const { data, content } = matter(raw);
+    const entry: WikiIndexEntry = {
+      relPath,
+      title: typeof data['title'] === 'string' ? data['title'] : path.basename(relPath, '.md'),
+      kind: typeof data['kind'] === 'string' ? data['kind'] : 'reference',
+      tags: Array.isArray(data['tags']) ? (data['tags'] as string[]) : [],
+      created: typeof data['created'] === 'string' ? data['created'] : '',
+      updated: typeof data['updated'] === 'string' ? data['updated'] : '',
+      body: content.trim(),
+    };
+    wikiIndex.set(id, entry);
+    logger.debug('wikiIndex cache miss — loaded from disk', { relPath });
+    return entry;
+  } catch {
+    return null;
+  }
 }
 
 export interface DateFilters {
@@ -153,7 +185,7 @@ export async function searchMemories(options: SearchOptions): Promise<SearchResu
   if (useVector && options.query) {
     results = await hybridSearch(options, options.query);
   } else {
-    results = keywordSearch(options);
+    results = await keywordSearch(options);
   }
 
   applySortBy(results, options.sort_by);
@@ -164,7 +196,7 @@ async function hybridSearch(options: SearchOptions, query: string): Promise<Sear
   const t0 = performance.now();
   const queryEmbedding = await embedText(query);
   const tEmbed = performance.now();
-  if (!queryEmbedding) return keywordSearch(options);
+  if (!queryEmbedding) return await keywordSearch(options);
 
   const WINDOW = Math.max(options.limit * 10, 50);
   const RRF_K = 10;
@@ -194,7 +226,7 @@ async function hybridSearch(options: SearchOptions, query: string): Promise<Sear
     const score = Math.round(rrf * 10000) / 10000;
     const snippet = ftsSnippet.get(id) || undefined;
 
-    const wEntry = wikiIndex.get(id);
+    const wEntry = await resolveWikiEntry(id);
     if (wEntry) {
       if (!passesWikiFilters(wEntry, options)) continue;
       candidates.push({ resultKind: 'wiki', wikiEntry: wEntry, score, snippet, stale: false });
@@ -220,7 +252,7 @@ async function hybridSearch(options: SearchOptions, query: string): Promise<Sear
   return candidates.slice(0, options.limit);
 }
 
-function keywordSearch(options: SearchOptions): SearchResult[] {
+async function keywordSearch(options: SearchOptions): Promise<SearchResult[]> {
   if (options.query && isFtsReady()) {
     return ftsKeywordSearch(options, options.query);
   }
@@ -250,12 +282,12 @@ function keywordSearch(options: SearchOptions): SearchResult[] {
   return results.slice(0, options.limit);
 }
 
-function ftsKeywordSearch(options: SearchOptions, query: string): SearchResult[] {
+async function ftsKeywordSearch(options: SearchOptions, query: string): Promise<SearchResult[]> {
   const ftsHits = searchFts(query, options.limit * 5);
   const results: SearchResult[] = [];
 
   for (const hit of ftsHits) {
-    const wEntry = wikiIndex.get(hit.id);
+    const wEntry = await resolveWikiEntry(hit.id);
     if (wEntry) {
       if (!passesWikiFilters(wEntry, options)) continue;
       results.push({ resultKind: 'wiki', wikiEntry: wEntry, score: hit.rank, snippet: hit.snippet || undefined, stale: false });
